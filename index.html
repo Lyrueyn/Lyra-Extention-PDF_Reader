@@ -1,0 +1,439 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>璃鸢镜 · PDF 阅读器</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: #0f0f0f; color: #e8e8e8;
+    font-family: "Segoe UI", "Microsoft YaHei UI", " Microsoft YaHei", sans-serif; }
+  body { display: flex; flex-direction: column; overflow: hidden; }
+
+  #top { flex: none; display: flex; align-items: center; gap: 8px; padding: 10px 14px;
+    background: #171717; border-bottom: 1px solid #2a2a2a; min-height: 54px; }
+  #brand { font-weight: 600; font-size: 15px; color: #e8e8e8; white-space: nowrap; }
+  #fileName { font-size: 12px; color: #9ba0a5; max-width: 30vw; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; margin-right: auto; }
+  .btn { height: 32px; padding: 0 12px; border: 0; border-radius: 8px; cursor: pointer;
+    background: #2a2a2a; color: #e8e8e8; font-size: 13px; white-space: nowrap; }
+  .btn:hover { background: #353535; }
+  .btn:disabled { opacity: .38; cursor: default; }
+  .btn.primary { background: #fb7299; color: #fff; }
+  .btn.primary:hover { background: #ff85a8; }
+  #pageBox { display: flex; align-items: center; gap: 4px; font-size: 13px; color: #cfd3d6; }
+  #pageInput { width: 52px; height: 30px; text-align: center; background: #0f0f0f;
+    color: #e8e8e8; border: 1px solid #333; border-radius: 7px; font-size: 13px; }
+  #pageTotal { color: #9ba0a5; }
+
+  #stage { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  #viewer { flex: 1; overflow: auto; padding: 22px 24px 60px; scroll-behavior: auto;
+    background: radial-gradient(circle at 50% 0%, #1b1b1b 0%, #101010 70%); }
+  #viewer::-webkit-scrollbar { width: 12px; height: 12px; }
+  #viewer::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 8px; border: 3px solid #101010; }
+
+  .pageWrap { margin: 0 auto 18px; background: #fff; border: 1px solid #3a3a3a;
+    border-radius: 3px; box-shadow: 0 6px 28px rgba(0,0,0,.45); position: relative;
+    overflow: hidden; }
+  .pageWrap canvas { display: block; width: 100%; height: 100%; }
+  .pageWrap .pnum { position: absolute; right: 6px; bottom: 4px; font-size: 10px;
+    color: #8a8a8a; background: rgba(255,255,255,.72); border-radius: 3px; padding: 0 4px;
+    pointer-events: none; }
+  .pageWrap.unloaded { background: #f2f2f2; }
+  .pageWrap.unloaded::after { content: "第 " attr(data-page) " 页"; position: absolute;
+    left: 50%; top: 50%; transform: translate(-50%,-50%); color: #999; font-size: 13px; }
+
+  body.night .pageWrap canvas { filter: invert(.9) hue-rotate(180deg); }
+
+  #empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: #101010; z-index: 3; }
+  #empty .card { max-width: 620px; width: min(86vw, 620px); padding: 34px 38px; border: 1px dashed #3a3a3a;
+    border-radius: 16px; background: #161616; text-align: center; }
+  #empty h1 { font-size: 22px; margin: 0 0 10px; font-weight: 600; }
+  #empty p { margin: 8px 0; color: #9ba0a5; font-size: 13px; line-height: 1.8; }
+  #empty .big { margin-top: 20px; height: 40px; padding: 0 22px; font-size: 14px; }
+  #dropHint { position: absolute; inset: 12px; border: 2px dashed #fb7299; border-radius: 14px;
+    display: none; align-items: center; justify-content: center; background: rgba(251,114,153,.1);
+    color: #ffd0de; font-size: 16px; z-index: 5; pointer-events: none; }
+  body.dragging #dropHint { display: flex; }
+
+  #loading { position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+    flex-direction: column; gap: 12px; background: rgba(10,10,10,.72); z-index: 4; }
+  #loading.show { display: flex; }
+  .spinner { width: 34px; height: 34px; border: 3px solid #333; border-top-color: #fb7299;
+    border-radius: 50%; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #loadingText { font-size: 13px; color: #cfd3d6; }
+
+  #status { flex: none; height: 28px; line-height: 28px; padding: 0 14px; font-size: 12px;
+    color: #8d9297; background: #141414; border-top: 1px solid #242424;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #status.error { color: #ff9c9c; }
+</style>
+</head>
+<body>
+  <div id="top">
+    <div id="brand">PDF 阅读器</div>
+    <div id="fileName">未打开文件</div>
+    <button class="btn primary" id="openBtn">打开 PDF</button>
+    <button class="btn" id="prevBtn" disabled>上一页</button>
+    <div id="pageBox">
+      <input id="pageInput" value="1" disabled/>
+      <span id="pageTotal">/ 0</span>
+    </div>
+    <button class="btn" id="nextBtn" disabled>下一页</button>
+    <button class="btn" id="fitBtn" disabled>适应宽度</button>
+    <button class="btn" id="zoomOutBtn" disabled>－</button>
+    <button class="btn" id="zoomInBtn" disabled>＋</button>
+    <button class="btn" id="nightBtn" disabled>夜间</button>
+  </div>
+
+  <div id="stage">
+    <div id="viewer"></div>
+    <div id="empty">
+      <div class="card">
+        <h1>打开一个 PDF 开始阅读</h1>
+        <p>点击下面的按钮选择文件，或者直接把 PDF 拖进这个窗口。</p>
+        <p>支持连续翻页、页码跳转、缩放、适应宽度和夜间模式。</p>
+        <button class="btn primary big" id="emptyOpenBtn">打开 PDF</button>
+      </div>
+    </div>
+    <div id="dropHint">松开打开这个 PDF</div>
+    <div id="loading"><div class="spinner"></div><div id="loadingText">正在加载…</div></div>
+  </div>
+
+  <div id="status">准备就绪</div>
+  <input type="file" id="fileInput" accept=".pdf,application/pdf" style="display:none"/>
+
+<script src="lib/pdf.min.js"></script>
+<script>
+(function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const viewer = $("viewer");
+  const fileInput = $("fileInput");
+  const empty = $("empty");
+  const loading = $("loading");
+  const statusEl = $("status");
+  const pageInput = $("pageInput");
+  const pageTotal = $("pageTotal");
+  const fileNameEl = $("fileName");
+
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "lib/pdf.worker.min.js";
+
+  const state = {
+    pdf: null,
+    fileName: "",
+    scale: 1,
+    dpr: Math.max(1, Math.min(2, window.devicePixelRatio || 1)),
+    pageW: 0,
+    pageH: 0,
+    pages: [],          // { wrap, canvas, rendered, rendering, num }
+    current: 1,
+    fit: true,
+    night: false,
+    observer: null,
+    renderToken: 0,
+  };
+
+  function setStatus(text, isError) {
+    statusEl.textContent = text || "";
+    statusEl.classList.toggle("error", !!isError);
+  }
+  function setLoading(on, text) {
+    loading.classList.toggle("show", !!on);
+    if (text) $("loadingText").textContent = text;
+  }
+  function updateControls() {
+    const has = !!state.pdf;
+    ["prevBtn", "nextBtn", "fitBtn", "zoomOutBtn", "zoomInBtn", "nightBtn"].forEach(id => {
+      $(id).disabled = !has;
+    });
+    pageInput.disabled = !has;
+    if (has) {
+      pageInput.value = String(state.current);
+      pageTotal.textContent = "/ " + state.pdf.numPages;
+    } else {
+      pageInput.value = "1";
+      pageTotal.textContent = "/ 0";
+    }
+  }
+
+  function calcScaleForWidth() {
+    const avail = Math.max(240, viewer.clientWidth - 48);
+    const s = avail / (state.pageW || 595);
+    return Math.max(0.25, Math.min(4, s));
+  }
+
+  function applyPageSizes() {
+    for (const p of state.pages) {
+      const w = Math.max(40, Math.round(state.pageW * state.scale));
+      const h = Math.max(40, Math.round(state.pageH * state.scale));
+      p.wrap.style.width = w + "px";
+      p.wrap.style.height = h + "px";
+      p.rendered = false;
+      p.wrap.classList.add("unloaded");
+      const c = p.canvas;
+      c.width = 0; c.height = 0;
+      c.style.width = ""; c.style.height = "";
+    }
+  }
+
+  async function renderPage(p) {
+    if (!state.pdf || p.rendered || p.rendering) return;
+    p.rendering = true;
+    try {
+      const page = await state.pdf.getPage(p.num);
+      const vp = page.getViewport({ scale: state.scale });
+      const dpr = state.dpr;
+      const canvas = p.canvas;
+      canvas.width = Math.max(1, Math.floor(vp.width * dpr));
+      canvas.height = Math.max(1, Math.floor(vp.height * dpr));
+      canvas.style.width = vp.width + "px";
+      canvas.style.height = vp.height + "px";
+      await page.render({
+        canvasContext: canvas.getContext("2d", { alpha: false }),
+        viewport: vp,
+        transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null,
+      }).promise;
+      p.rendered = true;
+      p.wrap.classList.remove("unloaded");
+    } catch (e) {
+      if (e && e.name === "RenderingCancelledException") return;
+      p.wrap.classList.remove("unloaded");
+    } finally {
+      p.rendering = false;
+    }
+  }
+
+  function setupObserver() {
+    if (state.observer) state.observer.disconnect();
+    state.observer = new IntersectionObserver((entries) => {
+      for (const en of entries) {
+        if (!en.isIntersecting) continue;
+        const p = state.pages[Number(en.target.dataset.idx)];
+        if (p) renderPage(p);
+      }
+    }, { root: viewer, rootMargin: "900px 0px" });
+    for (const p of state.pages) state.observer.observe(p.wrap);
+  }
+
+  async function buildPages() {
+    const pdf = state.pdf;
+    if (!pdf) return;
+    const first = await pdf.getPage(1);
+    const base = first.getViewport({ scale: 1 });
+    state.pageW = base.width;
+    state.pageH = base.height;
+    state.scale = calcScaleForWidth();
+    viewer.innerHTML = "";
+    state.pages = [];
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const wrap = document.createElement("div");
+      wrap.className = "pageWrap unloaded";
+      wrap.dataset.page = i;
+      wrap.dataset.idx = i - 1;
+      const canvas = document.createElement("canvas");
+      wrap.appendChild(canvas);
+      const num = document.createElement("span");
+      num.className = "pnum";
+      num.textContent = i;
+      wrap.appendChild(num);
+      viewer.appendChild(wrap);
+      state.pages.push({ wrap, canvas, rendered: false, rendering: false, num: i });
+    }
+    applyPageSizes();
+    setupObserver();
+    state.current = 1;
+    updateControls();
+    setStatus("已打开：" + state.fileName + "（共 " + pdf.numPages + " 页）");
+    // 立即渲染第一页附近
+    renderPage(state.pages[0]);
+    renderPage(state.pages[1]);
+  }
+
+  async function openPdfData(data, name) {
+    try {
+      setLoading(true, "正在解析 PDF…");
+      setStatus("正在解析 " + (name || "PDF") + "…");
+      empty.style.display = "none";
+      const token = ++state.renderToken;
+      if (state.pdf) { try { state.pdf.destroy(); } catch { } state.pdf = null; }
+      const doc = await pdfjsLib.getDocument({
+        data: new Uint8Array(data),
+        cMapUrl: "cmaps/",
+        cMapPacked: true,
+        standardFontDataUrl: "standard_fonts/",
+        isEvalSupported: false,
+      }).promise;
+      if (token !== state.renderToken) { try { doc.destroy(); } catch { } return; }
+      state.pdf = doc;
+      state.fileName = name || "PDF";
+      fileNameEl.textContent = name || "PDF";
+      document.title = name || "PDF";
+      await buildPages();
+      setLoading(false);
+    } catch (e) {
+      setLoading(false);
+      empty.style.display = "flex";
+      setStatus("打开失败：" + (e && e.message ? e.message : e), true);
+    }
+  }
+
+  async function openFile(file) {
+    if (!file) return;
+    const name = file.name || "PDF";
+    if (!/\.pdf$/i.test(name) && file.type !== "application/pdf") {
+      setStatus("这不是 PDF 文件", true);
+      return;
+    }
+    setStatus("正在读取 " + name + "…");
+    try {
+      const data = await file.arrayBuffer();
+      await openPdfData(data, name);
+    } catch (e) {
+      setLoading(false);
+      setStatus("读取失败：" + e.message, true);
+    }
+  }
+
+  function pickFile() { fileInput.value = ""; fileInput.click(); }
+  fileInput.addEventListener("change", () => openFile(fileInput.files && fileInput.files[0]));
+
+  $("openBtn").addEventListener("click", pickFile);
+  $("emptyOpenBtn").addEventListener("click", pickFile);
+
+  // 拖拽打开
+  let dragDepth = 0;
+  window.addEventListener("dragenter", (e) => {
+    e.preventDefault(); dragDepth++; document.body.classList.add("dragging");
+  });
+  window.addEventListener("dragover", (e) => e.preventDefault());
+  window.addEventListener("dragleave", (e) => {
+    e.preventDefault();
+    if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove("dragging"); }
+  });
+  window.addEventListener("drop", (e) => {
+    e.preventDefault(); dragDepth = 0; document.body.classList.remove("dragging");
+    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) openFile(f);
+  });
+
+  // 当前页：滚动时找最靠近视口中线的页面
+  let scrollTimer = 0;
+  viewer.addEventListener("scroll", () => {
+    if (!state.pdf) return;
+    if (scrollTimer) return;
+    scrollTimer = requestAnimationFrame(() => {
+      scrollTimer = 0;
+      const mid = viewer.scrollTop + viewer.clientHeight / 2;
+      let best = state.current, bestDist = Infinity;
+      for (const p of state.pages) {
+        const top = p.wrap.offsetTop;
+        const bottom = top + p.wrap.offsetHeight;
+        const dist = Math.abs((top + bottom) / 2 - mid);
+        if (dist < bestDist) { bestDist = dist; best = p.num; }
+      }
+      if (best !== state.current) {
+        state.current = best;
+        pageInput.value = String(best);
+      }
+    });
+  });
+
+  function gotoPage(n, smooth) {
+    if (!state.pdf) return;
+    n = Math.max(1, Math.min(state.pdf.numPages, Number(n) || 1));
+    state.current = n;
+    pageInput.value = String(n);
+    const p = state.pages[n - 1];
+    if (p) p.wrap.scrollIntoView({ block: "start", behavior: smooth === false ? "auto" : "smooth" });
+  }
+
+  $("prevBtn").addEventListener("click", () => gotoPage(state.current - 1));
+  $("nextBtn").addEventListener("click", () => gotoPage(state.current + 1));
+  pageInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); gotoPage(parseInt(pageInput.value, 10) || 1); pageInput.blur(); }
+  });
+
+  function setZoom(scale, keepPage) {
+    if (!state.pdf) return;
+    const cur = keepPage || state.current;
+    state.fit = false;
+    state.scale = Math.max(0.25, Math.min(5, scale));
+    applyPageSizes();
+    updateControls();
+    gotoPage(cur, false);
+    // 顶部/底部可见页重新渲染
+    const start = Math.max(0, cur - 2);
+    for (let i = start; i < Math.min(state.pages.length, cur + 1); i++) renderPage(state.pages[i]);
+    setStatus("缩放 " + Math.round(state.scale * 100) + "%");
+  }
+  $("zoomInBtn").addEventListener("click", () => setZoom(state.scale * 1.2));
+  $("zoomOutBtn").addEventListener("click", () => setZoom(state.scale / 1.2));
+  $("fitBtn").addEventListener("click", () => {
+    if (!state.pdf) return;
+    state.fit = true;
+    setZoom(calcScaleForWidth(), state.current);
+    setStatus("已适应宽度");
+  });
+
+  $("nightBtn").addEventListener("click", () => {
+    state.night = !state.night;
+    document.body.classList.toggle("night", state.night);
+    $("nightBtn").textContent = state.night ? "日间" : "夜间";
+    setStatus(state.night ? "夜间模式" : "日间模式");
+  });
+
+  // 键盘：翻页/缩放
+  window.addEventListener("keydown", (e) => {
+    if (!state.pdf) return;
+    if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) return;
+    if (e.key === "ArrowDown" || e.key === "PageDown" || e.key === "ArrowRight") {
+      e.preventDefault(); gotoPage(state.current + 1);
+    } else if (e.key === "ArrowUp" || e.key === "PageUp" || e.key === "ArrowLeft") {
+      e.preventDefault(); gotoPage(state.current - 1);
+    } else if (e.key === "+" || e.key === "=") {
+      e.preventDefault(); setZoom(state.scale * 1.2);
+    } else if (e.key === "-") {
+      e.preventDefault(); setZoom(state.scale / 1.2);
+    } else if (e.key === "0") {
+      e.preventDefault(); state.fit = true; setZoom(calcScaleForWidth(), state.current);
+    }
+  });
+
+  let resizeTimer = 0;
+  window.addEventListener("resize", () => {
+    if (!state.pdf) return;
+    if (resizeTimer) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      if (state.fit) {
+        const s = calcScaleForWidth();
+        if (Math.abs(s - state.scale) > 0.01) setZoom(s, state.current);
+      }
+    }, 180);
+  });
+
+  // 支持宿主通过 ?file=xxx 直接传文件（相对扩展目录）
+  (async function () {
+    try {
+      const q = new URLSearchParams(location.search);
+      const rel = q.get("file") || q.get("pdf");
+      if (!rel) return;
+      setLoading(true, "正在加载 PDF…");
+      const resp = await fetch(rel);
+      const buf = await resp.arrayBuffer();
+      const name = decodeURIComponent(rel.split("/").pop() || "PDF");
+      await openPdfData(buf, name);
+    } catch (e) {
+      setLoading(false);
+      setStatus("加载失败：" + e.message, true);
+    }
+  })();
+
+  updateControls();
+  setStatus("准备就绪 · 打开一个 PDF 或拖入文件");
+})();
+</script>
+</body>
+</html>
