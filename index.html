@@ -423,7 +423,8 @@
       setLoading(true, "正在加载 PDF…");
       const resp = await fetch(rel);
       const buf = await resp.arrayBuffer();
-      const name = decodeURIComponent(rel.split("/").pop() || "PDF");
+      const nameParam = q.get("name");
+      const name = nameParam ? decodeURIComponent(nameParam) : decodeURIComponent(rel.split("/").pop() || "PDF");
       await openPdfData(buf, name);
     } catch (e) {
       setLoading(false);
