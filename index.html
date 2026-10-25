@@ -26,8 +26,21 @@
     color: #e8e8e8; border: 1px solid #333; border-radius: 7px; font-size: 13px; }
   #pageTotal { color: #9ba0a5; }
 
-  #stage { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
-  #viewer { flex: 1; overflow: auto; padding: 22px 24px 60px; scroll-behavior: auto;
+  #stage { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: row; }
+  #thumbs { display: none; width: 158px; flex: none; overflow-y: auto; overflow-x: hidden;
+    background: #141414; border-right: 1px solid #2a2a2a; padding: 10px 8px 30px; }
+  #thumbs.show { display: block; }
+  #thumbs::-webkit-scrollbar { width: 8px; }
+  #thumbs::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 6px; }
+  #thumbTitle { font-size: 12px; color: #9ba0a5; padding: 2px 4px 8px; }
+  .thumb { display: block; width: 100%; margin: 0 0 10px; padding: 0; border: 0; cursor: pointer;
+    background: transparent; text-align: center; }
+  .thumb canvas { display: block; width: 100%; height: auto; background: #fff;
+    border: 1px solid #333; border-radius: 2px; }
+  .thumb.active canvas { border-color: #66ccff; box-shadow: 0 0 0 2px rgba(102,204,255,.5); }
+  .thumb .n { display: block; margin-top: 3px; font-size: 11px; color: #8d9297; }
+  .thumb.active .n { color: #66ccff; }
+  #viewer { flex: 1; min-width: 0; overflow: auto; padding: 22px 24px 60px; scroll-behavior: auto;
     background: radial-gradient(circle at 50% 0%, #1b1b1b 0%, #101010 70%); }
   #viewer::-webkit-scrollbar { width: 12px; height: 12px; }
   #viewer::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 8px; border: 3px solid #101010; }
@@ -76,6 +89,7 @@
     <div id="brand">PDF 阅读器</div>
     <div id="fileName">未打开文件</div>
     <button class="btn primary" id="openBtn">打开 PDF</button>
+    <button class="btn" id="thumbsBtn" disabled>缩略图</button>
     <button class="btn" id="prevBtn" disabled>上一页</button>
     <div id="pageBox">
       <input id="pageInput" value="1" disabled/>
@@ -89,6 +103,7 @@
   </div>
 
   <div id="stage">
+    <aside id="thumbs"><div id="thumbTitle">页面</div><div id="thumbList"></div></aside>
     <div id="viewer"></div>
     <div id="empty">
       <div class="card">
@@ -134,6 +149,9 @@
     night: false,
     observer: null,
     renderToken: 0,
+    thumbs: [],
+    thumbObserver: null,
+    thumbsVisible: true,
   };
 
   function setStatus(text, isError) {
@@ -146,7 +164,7 @@
   }
   function updateControls() {
     const has = !!state.pdf;
-    ["prevBtn", "nextBtn", "fitBtn", "zoomOutBtn", "zoomInBtn", "nightBtn"].forEach(id => {
+    ["prevBtn", "nextBtn", "fitBtn", "zoomOutBtn", "zoomInBtn", "nightBtn", "thumbsBtn"].forEach(id => {
       $(id).disabled = !has;
     });
     pageInput.disabled = !has;
@@ -218,6 +236,84 @@
     for (const p of state.pages) state.observer.observe(p.wrap);
   }
 
+  async function renderThumb(t) {
+    if (!state.pdf || t.rendered || t.rendering) return;
+    t.rendering = true;
+    try {
+      const page = await state.pdf.getPage(t.num);
+      const base = page.getViewport({ scale: 1 });
+      const vw = 132;
+      const scale = vw / base.width;
+      const vp = page.getViewport({ scale });
+      t.canvas.width = Math.max(1, Math.floor(vp.width));
+      t.canvas.height = Math.max(1, Math.floor(vp.height));
+      await page.render({
+        canvasContext: t.canvas.getContext("2d", { alpha: false }),
+        viewport: vp,
+      }).promise;
+      t.rendered = true;
+    } catch (e) { /* 忽略单页缩略图失败 */ }
+    finally { t.rendering = false; }
+  }
+
+  async function buildThumbs() {
+    const list = $("thumbList");
+    list.innerHTML = "";
+    state.thumbs = [];
+    if (state.thumbObserver) { state.thumbObserver.disconnect(); state.thumbObserver = null; }
+    if (!state.pdf) return;
+    for (let i = 1; i <= state.pdf.numPages; i++) {
+      const el = document.createElement("button");
+      el.className = "thumb";
+      el.title = "第 " + i + " 页";
+      const canvas = document.createElement("canvas");
+      const n = document.createElement("span");
+      n.className = "n";
+      n.textContent = String(i);
+      el.appendChild(canvas);
+      el.appendChild(n);
+      el.addEventListener("click", () => gotoPage(i));
+      list.appendChild(el);
+      state.thumbs.push({ el, canvas, rendered: false, rendering: false, num: i });
+    }
+    state.thumbObserver = new IntersectionObserver((entries) => {
+      for (const en of entries) {
+        if (!en.isIntersecting) continue;
+        const idx = Number(en.target.dataset.idx);
+        const t = state.thumbs[idx];
+        if (t) renderThumb(t);
+      }
+    }, { root: $("thumbs"), rootMargin: "600px 0px 0px" });
+    state.thumbs.forEach((t, i) => { t.el.dataset.idx = i; state.thumbObserver.observe(t.el); });
+    updateActiveThumb();
+  }
+
+  function showThumbs(on) {
+    state.thumbsVisible = !!on;
+    $("thumbs").classList.toggle("show", state.thumbsVisible);
+    const btn = $("thumbsBtn");
+    btn.textContent = state.thumbsVisible ? "隐藏缩略图" : "缩略图";
+    btn.disabled = !state.pdf;
+  }
+
+  function updateActiveThumb() {
+    if (!state.thumbs.length) return;
+    let changed = false;
+    for (const t of state.thumbs) {
+      const active = t.num === state.current;
+      if (active && !t.el.classList.contains("active")) changed = true;
+      t.el.classList.toggle("active", active);
+    }
+    if (changed) {
+      const el = state.thumbs[state.current - 1] && state.thumbs[state.current - 1].el;
+      if (el) {
+        const box = $("thumbs");
+        const target = el.offsetTop - box.clientHeight / 2 + el.offsetHeight / 2;
+        box.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
+      }
+    }
+  }
+
   async function buildPages() {
     const pdf = state.pdf;
     if (!pdf) return;
@@ -271,7 +367,10 @@
       state.fileName = name || "PDF";
       fileNameEl.textContent = name || "PDF";
       document.title = name || "PDF";
+      showThumbs(true);
       await buildPages();
+      await buildThumbs();
+      updateCurrentUi(1);
       setLoading(false);
     } catch (e) {
       setLoading(false);
@@ -319,6 +418,14 @@
     if (f) openFile(f);
   });
 
+  function updateCurrentUi(n) {
+    const max = state.pdf ? state.pdf.numPages : 1;
+    n = Math.max(1, Math.min(max, Number(n) || 1));
+    state.current = n;
+    if (document.activeElement !== pageInput) pageInput.value = String(n);
+    updateActiveThumb();
+  }
+
   // 当前页：滚动时找最靠近视口中线的页面
   let scrollTimer = 0;
   viewer.addEventListener("scroll", () => {
@@ -334,26 +441,49 @@
         const dist = Math.abs((top + bottom) / 2 - mid);
         if (dist < bestDist) { bestDist = dist; best = p.num; }
       }
-      if (best !== state.current) {
-        state.current = best;
-        pageInput.value = String(best);
-      }
+      if (best !== state.current) updateCurrentUi(best);
     });
   });
 
   function gotoPage(n, smooth) {
     if (!state.pdf) return;
     n = Math.max(1, Math.min(state.pdf.numPages, Number(n) || 1));
-    state.current = n;
-    pageInput.value = String(n);
+    updateCurrentUi(n);
     const p = state.pages[n - 1];
     if (p) p.wrap.scrollIntoView({ block: "start", behavior: smooth === false ? "auto" : "smooth" });
   }
 
   $("prevBtn").addEventListener("click", () => gotoPage(state.current - 1));
   $("nextBtn").addEventListener("click", () => gotoPage(state.current + 1));
+  let pageCommitBusy = false;
+  function commitPageInput() {
+    if (pageCommitBusy || !state.pdf) return;
+    pageCommitBusy = true;
+    try {
+      const n = parseInt(pageInput.value, 10) || 1;
+      gotoPage(n);
+      pageInput.value = String(state.current);
+      pageInput.blur();
+    } finally { pageCommitBusy = false; }
+  }
   pageInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") { e.preventDefault(); gotoPage(parseInt(pageInput.value, 10) || 1); pageInput.blur(); }
+    if (e.key === "Enter") { e.preventDefault(); commitPageInput(); }
+  });
+  pageInput.addEventListener("change", commitPageInput);
+  pageInput.addEventListener("blur", () => { if (state.pdf) commitPageInput(); });
+  pageInput.addEventListener("focus", () => pageInput.select());
+  let pageInputTimer = 0;
+  pageInput.addEventListener("input", () => {
+    if (!state.pdf) return;
+    clearTimeout(pageInputTimer);
+    pageInputTimer = setTimeout(commitPageInput, 420);
+  });
+  $("thumbsBtn").addEventListener("click", () => {
+    if (!state.pdf) return;
+    showThumbs(!state.thumbsVisible);
+    setTimeout(() => {
+      if (state.fit) setZoom(calcScaleForWidth(), state.current, true);
+    }, 220);
   });
 
   function setZoom(scale, keepPage) {

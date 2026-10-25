@@ -1,7 +1,7 @@
 ﻿{
   "id": "pdf",
   "name": "PDF 阅读器",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "entry": "index.html",
   "description": "在璃鸢镜中阅读 PDF：连续翻页、缩放、页码跳转、夜间模式。",
   "fileTypes": [".pdf"],
