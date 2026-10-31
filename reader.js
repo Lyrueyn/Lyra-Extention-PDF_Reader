@@ -12,6 +12,8 @@
   let frame = 0, resizeTimer = 0, pageTimer = 0, searchTimer = 0;
   let mode = "width", manualScale = 1, rotation = 0, sidebarTab = "thumbs";
   let lastViewerWidth = 0, lastViewerHeight = 0;
+  let presenting = false, srJobToken = 0, backendBase = "";
+  const srCache = new Map();   // key: page|scale|rotation → data URL
   pdfjsLib.GlobalWorkerOptions.workerSrc = "lib/pdf.worker.min.js";
 
   function status(message, error = false) {
@@ -38,6 +40,176 @@
     $("readingProgress").textContent = has ? `${doc.current} / ${doc.pdf.numPages} 页` : "";
   }
   function padding() { return parseFloat(getComputedStyle(viewer).paddingLeft) || 20; }
+
+  // ---- PPT 式放映：点一下下一页，Esc 退出 ----
+  function enterPresentation() {
+    if (!doc || presenting) return;
+    presenting = true;
+    document.body.classList.add("presenting");
+    $("presentBtn").textContent = "退出放映";
+    mode = "page";
+    try { document.documentElement.requestFullscreen?.().catch?.(() => {}); } catch { }
+    const a = anchor(); layout(a); gotoPage(doc.current);
+    viewer.focus();
+  }
+  function exitPresentation() {
+    if (!presenting) return;
+    presenting = false;
+    document.body.classList.remove("presenting");
+    $("presentBtn").textContent = "放映";
+    mode = "width";
+    try { if (document.fullscreenElement) document.exitFullscreen?.(); } catch { }
+    layout(anchor());
+  }
+  function togglePresentation() { presenting ? exitPresentation() : enterPresentation(); }
+  function presentationAdvance(dir) {
+    if (!doc) return;
+    const next = doc.current + dir;
+    if (next >= 1 && next <= doc.pages.length) gotoPage(next);
+  }
+
+  // ---- 页面超分（Real-ESRGAN 本机后端）----
+  async function backendSupports(base) {
+    try {
+      const res = await fetch(base + "/api/pdf/upscale", { cache: "no-store" });
+      if (!res.ok) return false;
+      const data = await res.json().catch(() => ({}));
+      return data.ok === true;
+    } catch { return false; }
+  }
+
+  async function findBackend() {
+    if (backendBase) return backendBase;
+    const q = new URLSearchParams(location.search).get("backend");
+    const candidates = [];
+    if (q) candidates.push(q.replace(/\/$/, ""));
+    for (let port = 8765; port <= 8799; port++) candidates.push(`http://127.0.0.1:${port}`);
+    for (const base of candidates) {
+      try {
+        const ctl = new AbortController();
+        const timer = setTimeout(() => ctl.abort(), 450);
+        const res = await fetch(base + "/health", { cache: "no-store", signal: ctl.signal });
+        clearTimeout(timer);
+        if (res.ok && await backendSupports(base)) { backendBase = base; return base; }
+      } catch { }
+    }
+    throw new Error("找不到带页面超分接口的本机后端（8765~8785）。请先启动新版璃鸢镜后端。");
+  }
+
+  function srKey(page, scale) { return `${page}|${scale}|${rotation}`; }
+
+  function clearSrImages() {
+    if (!doc) return;
+    for (const p of doc.pages) {
+      try { p.srImg?.remove(); } catch { }
+      p.srImg = null; p.srUrl = "";
+    }
+    srCache.clear();
+  }
+
+  function applySrOverlay(p) {
+    if (!p?.srUrl) return;
+    let img = p.srImg;
+    if (!img) {
+      img = document.createElement("img");
+      img.className = "srPage";
+      img.alt = "超分第 " + p.num + " 页";
+      img.draggable = false;
+      p.srImg = img;
+      p.wrap.prepend(img);
+    }
+    img.src = p.srUrl;
+    p.wrap.classList.remove("unloaded");
+  }
+
+  async function renderPagePng(pageNum, outScale) {
+    const page = await doc.pdf.getPage(pageNum);
+    // 超分前的底图宽度：2× 约 1400px，4× 约 900px，避免送入后端前就爆内存。
+    const targetWidth = outScale === 2 ? 1400 : 900;
+    const base = page.getViewport({ scale: 1, rotation: page.rotate + rotation });
+    const scale = targetWidth / base.width;
+    const vp = page.getViewport({ scale, rotation: page.rotate + rotation });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.floor(vp.width));
+    canvas.height = Math.max(1, Math.floor(vp.height));
+    await page.render({ canvasContext: canvas.getContext("2d", { alpha: false }), viewport: vp }).promise;
+    return canvas.toDataURL("image/png");
+  }
+
+  async function upscaleOnePage(pageNum, outScale) {
+    const key = srKey(pageNum, outScale);
+    if (srCache.has(key)) return srCache.get(key);
+    const source = await renderPagePng(pageNum, outScale);
+    const base = await findBackend();
+    const res = await fetch(base + "/api/pdf/upscale", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ image: source, scale: outScale }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok || typeof data.image !== "string") {
+      throw new Error(data.detail || data.error || `后端超分失败（HTTP ${res.status}）`);
+    }
+    srCache.set(key, data.image);
+    return data.image;
+  }
+
+  async function startSrJob() {
+    if (!doc) return;
+    const token = ++srJobToken;
+    const scope = document.querySelector('input[name="srScope"]:checked')?.value || "all";
+    const scale = Number($("srScale").value) || 2;
+    const start = scope === "all" ? 1 : clamp(Number($("srStart").value) || 1, 1, doc.pages.length);
+    const end = scope === "all" ? doc.pages.length : clamp(Number($("srEnd").value) || start, start, doc.pages.length);
+    const total = end - start + 1;
+    $("srStartBtn").disabled = true;
+    $("srCancel").disabled = false;
+    $("srProgress").value = 0;
+    $("srStatusText").textContent = `准备超分 ${start}–${end} 页（${scale}×）…`;
+    let done = 0, failed = 0;
+    try {
+      for (let n = start; n <= end; n++) {
+        if (token !== srJobToken) break;
+        $("srStatusText").textContent = `正在超分第 ${n} 页…（${done}/${total}）`;
+        try {
+          const url = await upscaleOnePage(n, scale);
+          const p = doc?.pages[n - 1];
+          if (token !== srJobToken || !p) break;
+          p.srUrl = url;
+          applySrOverlay(p);
+          done++;
+        } catch (e) {
+          failed++;
+          $("srStatusText").textContent = `第 ${n} 页失败：${e.message}`;
+        }
+        $("srProgress").value = done / total;
+        await yieldUI();
+      }
+      if (token === srJobToken) {
+        $("srStatusText").textContent = failed
+          ? `完成 ${done} 页，失败 ${failed} 页`
+          : `超分完成：${done} 页（${scale}×）`;
+        status(failed ? `超分完成 ${done} 页，${failed} 页失败` : `超分完成：${done} 页`, failed > 0);
+      }
+    } finally {
+      if (token === srJobToken) {
+        $("srStartBtn").disabled = false;
+        $("srCancel").disabled = true;
+      }
+    }
+  }
+
+  function showSrDialog() {
+    if (!doc) return;
+    $("srStart").max = doc.pages.length;
+    $("srEnd").max = doc.pages.length;
+    $("srStart").value = clamp(doc.current, 1, doc.pages.length);
+    $("srEnd").value = clamp(doc.current, 1, doc.pages.length);
+    $("srProgress").value = 0;
+    $("srStatusText").textContent = "未开始";
+    $("srDialog").showModal();
+  }
+
   function dimensions(p) {
     return rotation % 180 ? { w: p.baseH, h: p.baseW } : { w: p.baseW, h: p.baseH };
   }
@@ -508,6 +680,10 @@
 
   async function openDocument(source, name) {
     const token = ++openToken;
+    srJobToken++;
+    if (presenting) exitPresentation();
+    try { clearSrImages(); } catch { }
+    srCache.clear();
     clearTimeout(pageTimer); clearTimeout(searchTimer);
     dispose(doc); doc = null;
     const oldTask = loadingTask; loadingTask = null;
@@ -598,11 +774,28 @@
   $("zoomInBtn").onclick = () => zoomBy(1.2);
   $("zoomOutBtn").onclick = () => zoomBy(1 / 1.2);
   $("zoomMode").onchange = () => changeZoom($("zoomMode").value);
-  function rotate() { if (doc) { const a = anchor(); rotation = (rotation + 90) % 360; invalidate(); layout(a); } }
+  function rotate() { if (doc) { const a = anchor(); rotation = (rotation + 90) % 360; clearSrImages(); invalidate(); layout(a); } }
   $("rotateBtn").onclick = rotate;
+  $("presentBtn").onclick = togglePresentation;
+  $("srBtn").onclick = showSrDialog;
   $("nightBtn").onclick = () => {
     const on = document.body.classList.toggle("night");
     $("nightBtn").setAttribute("aria-pressed", String(on)); $("nightBtn").textContent = on ? "日间" : "夜间";
+  };
+  $("srForm").onsubmit = event => { event.preventDefault(); startSrJob(); };
+  document.querySelectorAll('input[name="srScope"]').forEach(el => {
+    el.addEventListener("change", () => {
+      const range = new FormData($("srForm")).get("srScope") === "range";
+      $("srStart").disabled = !range; $("srEnd").disabled = !range;
+    });
+    el.dispatchEvent(new Event("change"));
+  });
+  $("srClose").onclick = () => {
+    if ($("srCancel").disabled === false) { srJobToken++; $("srStatusText").textContent = "已取消"; }
+    $("srDialog").close();
+  };
+  $("srCancel").onclick = () => {
+    srJobToken++; $("srStatusText").textContent = "已取消"; $("srStartBtn").disabled = false; $("srCancel").disabled = true;
   };
   $("sidebarBtn").onclick = () => {
     const a = anchor(); $("sidebar").hidden = !$("sidebar").hidden;
@@ -642,11 +835,27 @@
   }
   viewer.addEventListener("pointerdown", interruptNavigation, { passive: true });
   viewer.addEventListener("touchstart", interruptNavigation, { passive: true });
+  viewer.addEventListener("click", event => {
+    if (!presenting || !doc) return;
+    if (event.target.closest?.("a, button, input, select, textarea, summary")) return;
+    event.preventDefault();
+    presentationAdvance(1);
+  }, true);
   viewer.addEventListener("wheel", event => {
     interruptNavigation();
     if (event.ctrlKey && doc) { event.preventDefault(); zoomBy(Math.exp(-event.deltaY * .002)); }
   }, { passive: false });
   window.addEventListener("keydown", event => {
+    if (presenting) {
+      if (event.key === "Escape") { event.preventDefault(); exitPresentation(); return; }
+      if (event.key === "ArrowRight" || event.key === "PageDown" || event.key === " " || event.key === "Enter") {
+        event.preventDefault(); presentationAdvance(1); return;
+      }
+      if (event.key === "ArrowLeft" || event.key === "PageUp" || event.key === "Backspace") {
+        event.preventDefault(); presentationAdvance(-1); return;
+      }
+      if (event.key === "q" || event.key === "Q") { event.preventDefault(); exitPresentation(); return; }
+    }
     const edit = event.target.closest?.("input, textarea, select, [contenteditable='true']");
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "o") { event.preventDefault(); pickFile(); return; }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f" && doc) { event.preventDefault(); showSearch(true); return; }

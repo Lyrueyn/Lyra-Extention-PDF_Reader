@@ -29,6 +29,8 @@
         <button class="btn icon" id="zoomInBtn" data-document disabled aria-label="放大">＋</button>
       </div>
       <button class="btn" id="rotateBtn" data-document disabled title="顺时针旋转 90° · R">旋转</button>
+      <button class="btn" id="presentBtn" data-document disabled title="PPT 式放映：点一下下一页，Esc 退出">放映</button>
+      <button class="btn" id="srBtn" data-document disabled title="Real-ESRGAN 页面超分（可选整篇/范围/倍率）">超分</button>
       <button class="btn" id="nightBtn" aria-pressed="false">夜间</button>
     </div>
   </header>
@@ -58,6 +60,7 @@
     <div id="dropHint">松开以打开 PDF</div>
     <div id="loading" hidden role="status"><div class="spinner"></div><span id="loadingText">正在加载…</span></div>
   </main>
+  <div id="presentHint">点击：下一页 · ← → 翻页 · Esc 退出放映</div>
   <footer><span id="status" role="status">准备就绪</span><span id="readingProgress"></span></footer>
   <dialog id="passwordDialog" aria-labelledby="passwordTitle">
     <form id="passwordForm"><h2 id="passwordTitle">此 PDF 需要密码</h2><p id="passwordHint">输入文档密码后继续阅读。</p>
@@ -66,6 +69,28 @@
     </form>
   </dialog>
   <input type="file" id="fileInput" accept=".pdf,application/pdf" hidden>
+  <dialog id="srDialog" aria-labelledby="srTitle">
+    <form id="srForm">
+      <h2 id="srTitle">页面超分（Real-ESRGAN）</h2>
+      <p class="muted">把 PDF 页面渲染后交给本机 Real-ESRGAN 放大。整篇处理会逐页进行，页数多时耗时较长。</p>
+      <fieldset>
+        <legend>处理范围</legend>
+        <label><input type="radio" name="srScope" value="all" checked> 整篇</label>
+        <label><input type="radio" name="srScope" value="range"> 指定页码范围</label>
+        <span class="srRange"><input id="srStart" type="number" min="1" value="1" aria-label="起始页"> 至 <input id="srEnd" type="number" min="1" value="1" aria-label="结束页"></span>
+      </fieldset>
+      <label class="srScale">倍率
+        <select id="srScale"><option value="2">2×</option><option value="4">4×</option></select>
+      </label>
+      <p class="hint">2× 约把页面渲染到 2 倍像素；4× 更清晰但显存/内存占用明显更大。超分只影响显示，不修改原 PDF。</p>
+      <div class="srStatus"><progress id="srProgress" max="1" value="0"></progress><span id="srStatusText">未开始</span></div>
+      <div class="dialogActions">
+        <button class="btn" type="button" id="srClose">关闭</button>
+        <button class="btn" type="button" id="srCancel" disabled>取消</button>
+        <button class="btn primary" type="submit" id="srStartBtn">开始超分</button>
+      </div>
+    </form>
+  </dialog>
   <script src="lib/pdf.min.js"></script>
   <script src="reader.js"></script>
 </body>
