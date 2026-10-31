@@ -1,7 +1,7 @@
 {
   "id": "pdf",
   "name": "PDF 阅读器",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "entry": "index.html",
   "description": "连续阅读、目录与缩略图、文字复制、全文查找、旋转、适应宽度与夜间模式；PPT 式放映与 Real-ESRGAN 页面超分。",
   "fileTypes": [".pdf"],

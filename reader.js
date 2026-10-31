@@ -774,6 +774,9 @@
     const token = ++openToken;
     srJobToken++;
     if (presenting) exitPresentation();
+    document.body.classList.remove("sr-switch-on");
+    $("srSwitchBtn").setAttribute("aria-pressed", "false");
+    $("srSwitchBtn").textContent = "版本";
     try { clearSrImages(); } catch { }
     srCache.clear();
     clearTimeout(pageTimer); clearTimeout(searchTimer);
@@ -870,6 +873,11 @@
   $("rotateBtn").onclick = rotate;
   $("presentBtn").onclick = togglePresentation;
   $("srBtn").onclick = showSrDialog;
+  $("srSwitchBtn").onclick = () => {
+    const on = document.body.classList.toggle("sr-switch-on");
+    $("srSwitchBtn").setAttribute("aria-pressed", String(on));
+    $("srSwitchBtn").textContent = on ? "隐藏版本" : "版本";
+  };
   $("nightBtn").onclick = () => {
     const on = document.body.classList.toggle("night");
     $("nightBtn").setAttribute("aria-pressed", String(on)); $("nightBtn").textContent = on ? "日间" : "夜间";
@@ -1006,4 +1014,6 @@
     try { fallback = decodeURIComponent(fallback); } catch { /* retain literal filename */ }
     openDocument(source, query.get("name") || fallback);
   }
+  // 去掉 WebView2 默认右键菜单（返回/刷新/另存为/打印/检查），PDF 阅读时不弹浏览器小浮窗。
+  document.addEventListener("contextmenu", event => event.preventDefault());
 })();
