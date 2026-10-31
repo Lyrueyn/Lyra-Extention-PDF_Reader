@@ -15,7 +15,7 @@
   let presenting = false, srJobToken = 0, backendBase = "";
   let presentationRestore = null;   // 进入放映前的缩放方式/倍率/旋转，退出时恢复
   const srCache = new Map();   // key: page|scale|rotation → data URL
-  pdfjsLib.GlobalWorkerOptions.workerSrc = "lib/pdf.worker.min.js";
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "lib/pdf.worker.min.js?v=0.4.5";
 
   function status(message, error = false) {
     $("status").textContent = message;
