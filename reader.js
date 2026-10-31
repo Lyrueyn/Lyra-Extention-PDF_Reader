@@ -13,6 +13,7 @@
   let mode = "width", manualScale = 1, rotation = 0, sidebarTab = "thumbs";
   let lastViewerWidth = 0, lastViewerHeight = 0;
   let presenting = false, srJobToken = 0, backendBase = "";
+  let presentationRestore = null;   // 进入放映前的缩放方式/倍率/旋转，退出时恢复
   const srCache = new Map();   // key: page|scale|rotation → data URL
   pdfjsLib.GlobalWorkerOptions.workerSrc = "lib/pdf.worker.min.js";
 
@@ -42,15 +43,21 @@
   }
   function padding() { return parseFloat(getComputedStyle(viewer).paddingLeft) || 20; }
 
-  // ---- PPT 式放映：点一下下一页，Esc 退出 ----
+  // ---- PPT 式放映：只显示当前这一页，左侧上一页、右侧下一页，Esc 退出 ----
+  function syncPresentationView() {
+    if (!doc) return;
+    for (const p of doc.pages) p.wrap.classList.toggle("present-active", p.num === doc.current);
+    viewer.scrollTop = 0; viewer.scrollLeft = 0;
+  }
   function enterPresentation() {
     if (!doc || presenting) return;
+    presentationRestore = { mode, manualScale, rotation };
     presenting = true;
     document.body.classList.add("presenting");
     $("presentBtn").textContent = "退出放映";
     mode = "page";
     try { document.documentElement.requestFullscreen?.().catch?.(() => {}); } catch { }
-    const a = anchor(); layout(a); gotoPage(doc.current);
+    const a = anchor(); layout(a); gotoPage(doc.current); syncPresentationView();
     viewer.focus();
   }
   function exitPresentation() {
@@ -58,7 +65,13 @@
     presenting = false;
     document.body.classList.remove("presenting");
     $("presentBtn").textContent = "放映";
-    mode = "width";
+    for (const p of doc?.pages || []) p.wrap.classList.remove("present-active");
+    if (presentationRestore) {
+      mode = presentationRestore.mode;
+      manualScale = presentationRestore.manualScale;
+      rotation = presentationRestore.rotation;
+      presentationRestore = null;
+    }
     try { if (document.fullscreenElement) document.exitFullscreen?.(); } catch { }
     layout(anchor());
   }
@@ -331,6 +344,7 @@
     }
     pagesEl.style.width = width + "px";
     restoreAnchor(a);
+    if (presenting) { syncPresentationView(); viewer.scrollTop = 0; viewer.scrollLeft = 0; }
     if (doc.navigationPosition) doc.navigationPosition.top = viewer.scrollTop;
     controls(); schedule();
   }
@@ -576,7 +590,9 @@
       // Long smooth scrolls would render every intervening page in a large document.
       viewer.scrollTop = Math.max(0, p.top - padding());
       d.navigationPosition = { page: n, top: viewer.scrollTop };
-      setCurrent(n); schedule();
+      setCurrent(n);
+      if (presenting) { syncPresentationView(); viewer.scrollTop = 0; viewer.scrollLeft = 0; }
+      schedule();
     } catch (error) { if (d === doc) status(`无法跳转到第 ${n} 页：${error.message}`, true); }
   }
   function buildPages(d, first) {
@@ -924,7 +940,10 @@
     if (!presenting || !doc) return;
     if (event.target.closest?.("a, button, input, select, textarea, summary")) return;
     event.preventDefault();
-    presentationAdvance(1);
+    // 放映时左侧点击上一页，右侧点击下一页；避免只能往后翻。
+    const box = viewer.getBoundingClientRect();
+    const x = event.clientX - box.left;
+    presentationAdvance(x < box.width * 0.38 ? -1 : 1);
   }, true);
   viewer.addEventListener("wheel", event => {
     interruptNavigation();
