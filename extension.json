@@ -1,7 +1,7 @@
 {
   "id": "pdf",
   "name": "PDF 阅读器",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "entry": "index.html",
   "description": "连续阅读、目录与缩略图、文字复制、全文查找、旋转、适应宽度与夜间模式。",
   "fileTypes": [".pdf"],

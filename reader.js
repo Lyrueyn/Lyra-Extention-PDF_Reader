@@ -690,6 +690,15 @@
   window.addEventListener("pagehide", () => { dispose(doc); doc = null; loadingTask?.destroy().catch(() => {}); });
   controls();
   const query = new URLSearchParams(location.search), source = query.get("file") || query.get("pdf");
+  // ★ 关闭握手：宿主会在 Close 时发 host.finalize；即使没有需要落盘的状态也要回执，避免恒定等 1.5s。
+  const hostSession = query.get("sessionId") || "";
+  window.chrome?.webview?.addEventListener("message", event => {
+    const msg = event.data;
+    if (!msg || msg.type !== "host.finalize") return;
+    try {
+      window.chrome.webview.postMessage({ type: "host.finalized", requestId: msg.requestId || "", sessionId: hostSession, ok: true, revision: 0 });
+    } catch { }
+  });
   if (source) {
     // URLSearchParams has already decoded name. A second decode breaks literal '%' names.
     let fallback = source.split("/").pop() || "PDF";
