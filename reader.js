@@ -38,6 +38,7 @@
     $("zoomOutBtn").disabled = !has || (mode === "custom" && manualScale <= .25);
     $("zoomInBtn").disabled = !has || (mode === "custom" && manualScale >= 5);
     $("readingProgress").textContent = has ? `${doc.current} / ${doc.pdf.numPages} 页` : "";
+    updateSrSwitchButton();
   }
   function padding() { return parseFloat(getComputedStyle(viewer).paddingLeft) || 20; }
 
@@ -102,27 +103,37 @@
     if (!doc) return;
     for (const p of doc.pages) {
       try { p.srImg?.remove(); } catch { }
+      try { p.srControl?.remove(); } catch { }
       p.srImg = null;
+      p.srControl = null; p.srSelect = null;
       p.srUrls = {};
       p.srMode = 0;
       p.srBusy = false;
       p.srReqToken = (p.srReqToken || 0) + 1;
       p.wrap.classList.remove("sr-active");
-      updatePageSrControl(p);
     }
     srCache.clear();
+    updateSrSwitchButton();
+  }
+
+  function updateSrSwitchButton() {
+    const btn = $("srSwitchBtn");
+    const has = !!doc && doc.pages.some(p => p.srUrls && Object.keys(p.srUrls).length > 0);
+    btn.disabled = !has;
+    if (!has) {
+      document.body.classList.remove("sr-switch-on");
+      btn.setAttribute("aria-pressed", "false");
+      btn.textContent = "版本";
+    }
   }
 
   function ensurePageSrControl(p) {
-    if (!p || p.srControl) return;
+    // 只有这一页已经超分过（至少有一个版本）才创建下拉框；没超分过就不提供选择。
+    if (!p || p.srControl || !Object.keys(p.srUrls || {}).length) return;
     const box = document.createElement("div");
     box.className = "srSwitch";
-    box.title = "本页超分版本（原图 / 2× / 4×）";
+    box.title = "本页已生成的超分版本";
     const select = document.createElement("select");
-    for (const [value, label] of [[0, "原图"], [2, "超分 2×"], [4, "超分 4×"]]) {
-      const opt = document.createElement("option");
-      opt.value = String(value); opt.textContent = label; select.append(opt);
-    }
     select.addEventListener("pointerdown", event => event.stopPropagation());
     select.addEventListener("click", event => event.stopPropagation());
     select.addEventListener("change", () => choosePageSr(p, Number(select.value)));
@@ -135,19 +146,22 @@
   function updatePageSrControl(p) {
     if (!p?.srSelect) return;
     const urls = p.srUrls || {};
-    for (const opt of p.srSelect.options) {
-      const v = Number(opt.value);
-      const base = v === 0 ? "原图" : `超分 ${v}×`;
-      opt.textContent = base + (v && urls[v] ? " ✓" : "");
-    }
-    p.srSelect.value = String(p.srMode || 0);
+    const modes = [0, ...[2, 4].filter(v => urls[v])];
+    const current = modes.includes(Number(p.srMode)) ? Number(p.srMode) : 0;
+    p.srSelect.replaceChildren(...modes.map(value => {
+      const opt = document.createElement("option");
+      opt.value = String(value);
+      opt.textContent = value === 0 ? "原图" : `超分 ${value}× ✓`;
+      return opt;
+    }));
+    p.srSelect.value = String(current);
     p.srSelect.disabled = !!p.srBusy;
     p.srControl.classList.toggle("busy", !!p.srBusy);
   }
 
   function applySrOverlay(p) {
     if (!p) return;
-    ensurePageSrControl(p);
+    if (Object.keys(p.srUrls || {}).length) ensurePageSrControl(p);
     const mode = Number(p.srMode) || 0;
     if (mode && p.srUrls?.[mode]) {
       let img = p.srImg;
@@ -168,44 +182,18 @@
       p.wrap.classList.remove("sr-active");
     }
     updatePageSrControl(p);
+    updateSrSwitchButton();
   }
 
-  async function choosePageSr(p, mode) {
+  function choosePageSr(p, mode) {
     if (!p || !doc) return;
-    if (!mode) {
-      p.srMode = 0;
-      applySrOverlay(p);
+    // 只能切到已经生成好的版本；没生成的版本不会出现在下拉框里，也不在这里触发超分。
+    if (mode && !p.srUrls?.[mode]) {
+      if (p.srSelect) p.srSelect.value = String(p.srMode || 0);
       return;
     }
-    if (p.srUrls?.[mode]) {
-      p.srMode = mode;
-      applySrOverlay(p);
-      return;
-    }
-    const token = (p.srReqToken = (p.srReqToken || 0) + 1);
-    p.srBusy = true;
-    updatePageSrControl(p);
-    status(`正在超分第 ${p.num} 页（${mode}×）…`);
-    try {
-      const url = await upscaleOnePage(p.num, mode);
-      if (token !== p.srReqToken) return;
-      p.srUrls = p.srUrls || {};
-      p.srUrls[mode] = url;
-      p.srMode = mode;
-      applySrOverlay(p);
-      status(`第 ${p.num} 页已切换为 ${mode}× 超分`);
-    } catch (e) {
-      if (token === p.srReqToken) {
-        p.srMode = 0;
-        applySrOverlay(p);
-        status(`第 ${p.num} 页超分失败：${e.message}`, true);
-      }
-    } finally {
-      if (token === p.srReqToken) {
-        p.srBusy = false;
-        updatePageSrControl(p);
-      }
-    }
+    p.srMode = mode;
+    applySrOverlay(p);
   }
 
   async function renderPagePng(pageNum, outScale) {
@@ -600,12 +588,9 @@
       sheet.className = "thumbSheet"; label.className = "n"; label.textContent = num;
       thumb.append(sheet, label); thumb.onclick = () => gotoPage(num);
       pageFragment.append(wrap); thumbFragment.append(thumb);
-      const p = { num, wrap, thumb, thumbSheet: sheet, baseW: base.width, baseH: base.height,
+      d.pages.push({ num, wrap, thumb, thumbSheet: sheet, baseW: base.width, baseH: base.height,
         known: num === 1, canvas: null, pixels: 0, drawEpoch: -1, thumbEpoch: -1, errorEpoch: -1, thumbErrorEpoch: -1,
-        srUrls: {}, srMode: 0, srImg: null, srBusy: false };
-      d.pages.push(p);
-      // 每页都有独立的超分版本下拉框；未生成的分支会只对当前页现场超分。
-      ensurePageSrControl(p);
+        srUrls: {}, srMode: 0, srImg: null, srBusy: false });
     }
     pagesEl.replaceChildren(pageFragment); $("thumbList").replaceChildren(thumbFragment);
     viewer.scrollTop = 0; viewer.scrollLeft = 0; thumbs.scrollTop = 0;
