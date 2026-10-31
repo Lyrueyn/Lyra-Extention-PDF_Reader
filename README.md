@@ -1,6 +1,6 @@
-# 璃鸢镜 PDF 阅读扩展
+﻿# 璃鸢镜 PDF 阅读扩展
 
-独立网页扩展，使用本地 PDF.js 3.11.174。入口为 `index.html`，由璃鸢镜的 WebView2 宿主打开，也可用普通浏览器通过本地 HTTP 服务测试。当前版本：**0.4.5**。
+独立网页扩展，使用本地 PDF.js 3.11.174。入口为 `index.html`，由璃鸢镜的 WebView2 宿主打开，也可用普通浏览器通过本地 HTTP 服务测试。当前版本：**0.4.6**。
 
 ## 新增：PPT 式放映
 
@@ -70,3 +70,4 @@ node tests/smoke.cjs
 压缩包根目录应直接包含 `extension.json`、`index.html`、`reader.css`、`reader.js`、`LICENSE`、`lib/`、`cmaps/`、`standard_fonts/`，不要再套一层目录。不要打包 `.git/`、`tests/` 或 `artifacts/`。
 
 扩展源码保留在独立仓库，不并入璃鸢镜主程序仓库。
+

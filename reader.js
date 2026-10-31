@@ -15,7 +15,7 @@
   let presenting = false, srJobToken = 0, backendBase = "";
   let presentationRestore = null;   // 进入放映前的缩放方式/倍率/旋转，退出时恢复
   const srCache = new Map();   // key: page|scale|rotation → data URL
-  pdfjsLib.GlobalWorkerOptions.workerSrc = "lib/pdf.worker.min.js?v=0.4.5";
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "lib/pdf.worker.min.js?v=0.4.6";
 
   function status(message, error = false) {
     $("status").textContent = message;
@@ -76,6 +76,11 @@
     layout(anchor());
   }
   function togglePresentation() { presenting ? exitPresentation() : enterPresentation(); }
+  $("presentExit").onclick = event => { event.stopPropagation(); exitPresentation(); };
+  document.addEventListener("fullscreenchange", () => {
+    // 用户按 Esc 先退出浏览器全屏时，页面也要一起退出放映，避免停留在黑底模式。
+    if (presenting && !document.fullscreenElement) exitPresentation();
+  });
   function presentationAdvance(dir) {
     if (!doc) return;
     const next = doc.current + dir;
@@ -403,6 +408,17 @@
   function refresh() {
     const d = doc;
     if (!d?.pages.length) return;
+    if (presenting) {
+      // 放映模式其余页全部 display:none，不能再用滚动位置判断可见页；直接渲染当前页并预取相邻页。
+      const nums = [d.current - 1, d.current, d.current + 1].filter(n => n >= 1 && n <= d.pages.length);
+      d.wanted = new Set(nums); d.visible = new Set(nums);
+      for (const n of nums) {
+        const p = d.pages[n - 1];
+        if (!p || p.canvas || d.mainJobs.has(p.num) || p.drawEpoch === d.epoch || p.errorEpoch === d.epoch) continue;
+        renderPage(d, p);
+      }
+      return;
+    }
     const start = viewer.scrollTop, end = start + viewer.clientHeight;
     let current = pageAt(start + Math.min(viewer.clientHeight * .25, 150));
     if (start >= viewer.scrollHeight - viewer.clientHeight - 2) current = d.pages.length - 1;
@@ -964,6 +980,7 @@
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "o") { event.preventDefault(); pickFile(); return; }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f" && doc) { event.preventDefault(); showSearch(true); return; }
     if (!doc || edit || $("passwordDialog").open || event.altKey || event.ctrlKey || event.metaKey) return;
+    if (event.key === "F5") { event.preventDefault(); togglePresentation(); return; }
     if (event.key === "Escape" && !$("searchBar").hidden) { showSearch(false); return; }
     if (event.key === "ArrowRight") { event.preventDefault(); gotoPage(doc.current + 1); }
     else if (event.key === "ArrowLeft") { event.preventDefault(); gotoPage(doc.current - 1); }
@@ -1021,3 +1038,4 @@
   // 去掉 WebView2 默认右键菜单（返回/刷新/另存为/打印/检查），PDF 阅读时不弹浏览器小浮窗。
   document.addEventListener("contextmenu", event => event.preventDefault());
 })();
+

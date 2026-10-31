@@ -113,6 +113,8 @@ body.presenting .pageWrap.present-active { display: block; }
 body.presenting #dropHint { display: none; }
 #presentHint { position: fixed; right: 18px; bottom: 16px; z-index: 20; padding: 7px 11px; border-radius: 7px; background: #000b; color: #dfe8f2; font-size: 12px; pointer-events: none; }
 body.presenting #presentHint { display: block; }
+#presentExit { display: none; position: fixed; right: 18px; top: 14px; z-index: 30; background: #000c; border-color: #ffffff33; color: #e6eef7; }
+body.presenting #presentExit { display: block; }
 #presentHint { display: none; }
 
 /* ---- 超分设置 / 页面图 ---- */

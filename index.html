@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
   <title>璃鸢镜 · PDF 阅读器</title>
-  <link rel="stylesheet" href="reader.css?v=0.4.5">
+  <link rel="stylesheet" href="reader.css?v=0.4.6">
 </head>
 <body>
   <header id="top">
@@ -62,6 +62,7 @@
     <div id="loading" hidden role="status"><div class="spinner"></div><span id="loadingText">正在加载…</span></div>
   </main>
   <div id="presentHint">点击左侧：上一页 · 点击右侧：下一页 · ← → 翻页 · Esc 退出放映</div>
+  <button class="btn" id="presentExit" type="button" title="退出放映">退出放映</button>
   <footer><span id="status" role="status">准备就绪</span><span id="readingProgress"></span></footer>
   <dialog id="passwordDialog" aria-labelledby="passwordTitle">
     <form id="passwordForm"><h2 id="passwordTitle">此 PDF 需要密码</h2><p id="passwordHint">输入文档密码后继续阅读。</p>
@@ -92,7 +93,8 @@
       </div>
     </form>
   </dialog>
-  <script src="lib/pdf.min.js?v=0.4.5"></script>
-  <script src="reader.js?v=0.4.5"></script>
+  <script src="lib/pdf.min.js?v=0.4.6"></script>
+  <script src="reader.js?v=0.4.6"></script>
 </body>
 </html>
+
