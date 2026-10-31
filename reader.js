@@ -102,24 +102,110 @@
     if (!doc) return;
     for (const p of doc.pages) {
       try { p.srImg?.remove(); } catch { }
-      p.srImg = null; p.srUrl = "";
+      p.srImg = null;
+      p.srUrls = {};
+      p.srMode = 0;
+      p.srBusy = false;
+      p.srReqToken = (p.srReqToken || 0) + 1;
+      p.wrap.classList.remove("sr-active");
+      updatePageSrControl(p);
     }
     srCache.clear();
   }
 
-  function applySrOverlay(p) {
-    if (!p?.srUrl) return;
-    let img = p.srImg;
-    if (!img) {
-      img = document.createElement("img");
-      img.className = "srPage";
-      img.alt = "超分第 " + p.num + " 页";
-      img.draggable = false;
-      p.srImg = img;
-      p.wrap.prepend(img);
+  function ensurePageSrControl(p) {
+    if (!p || p.srControl) return;
+    const box = document.createElement("div");
+    box.className = "srSwitch";
+    box.title = "本页超分版本（原图 / 2× / 4×）";
+    const select = document.createElement("select");
+    for (const [value, label] of [[0, "原图"], [2, "超分 2×"], [4, "超分 4×"]]) {
+      const opt = document.createElement("option");
+      opt.value = String(value); opt.textContent = label; select.append(opt);
     }
-    img.src = p.srUrl;
-    p.wrap.classList.remove("unloaded");
+    select.addEventListener("pointerdown", event => event.stopPropagation());
+    select.addEventListener("click", event => event.stopPropagation());
+    select.addEventListener("change", () => choosePageSr(p, Number(select.value)));
+    box.append(select);
+    p.wrap.append(box);
+    p.srControl = box; p.srSelect = select;
+    updatePageSrControl(p);
+  }
+
+  function updatePageSrControl(p) {
+    if (!p?.srSelect) return;
+    const urls = p.srUrls || {};
+    for (const opt of p.srSelect.options) {
+      const v = Number(opt.value);
+      const base = v === 0 ? "原图" : `超分 ${v}×`;
+      opt.textContent = base + (v && urls[v] ? " ✓" : "");
+    }
+    p.srSelect.value = String(p.srMode || 0);
+    p.srSelect.disabled = !!p.srBusy;
+    p.srControl.classList.toggle("busy", !!p.srBusy);
+  }
+
+  function applySrOverlay(p) {
+    if (!p) return;
+    ensurePageSrControl(p);
+    const mode = Number(p.srMode) || 0;
+    if (mode && p.srUrls?.[mode]) {
+      let img = p.srImg;
+      if (!img) {
+        img = document.createElement("img");
+        img.className = "srPage";
+        img.alt = "超分第 " + p.num + " 页";
+        img.draggable = false;
+        p.srImg = img;
+        p.wrap.prepend(img);
+      }
+      img.src = p.srUrls[mode];
+      p.wrap.classList.add("sr-active");
+      p.wrap.classList.remove("unloaded");
+    } else {
+      try { p.srImg?.remove(); } catch { }
+      p.srImg = null;
+      p.wrap.classList.remove("sr-active");
+    }
+    updatePageSrControl(p);
+  }
+
+  async function choosePageSr(p, mode) {
+    if (!p || !doc) return;
+    if (!mode) {
+      p.srMode = 0;
+      applySrOverlay(p);
+      return;
+    }
+    if (p.srUrls?.[mode]) {
+      p.srMode = mode;
+      applySrOverlay(p);
+      return;
+    }
+    const token = (p.srReqToken = (p.srReqToken || 0) + 1);
+    p.srBusy = true;
+    updatePageSrControl(p);
+    status(`正在超分第 ${p.num} 页（${mode}×）…`);
+    try {
+      const url = await upscaleOnePage(p.num, mode);
+      if (token !== p.srReqToken) return;
+      p.srUrls = p.srUrls || {};
+      p.srUrls[mode] = url;
+      p.srMode = mode;
+      applySrOverlay(p);
+      status(`第 ${p.num} 页已切换为 ${mode}× 超分`);
+    } catch (e) {
+      if (token === p.srReqToken) {
+        p.srMode = 0;
+        applySrOverlay(p);
+        status(`第 ${p.num} 页超分失败：${e.message}`, true);
+      }
+    } finally {
+      if (token === p.srReqToken) {
+        p.srBusy = false;
+        updatePageSrControl(p);
+      }
+    }
   }
 
   async function renderPagePng(pageNum, outScale) {
@@ -175,7 +261,9 @@
           const url = await upscaleOnePage(n, scale);
           const p = doc?.pages[n - 1];
           if (token !== srJobToken || !p) break;
-          p.srUrl = url;
+          p.srUrls = p.srUrls || {};
+          p.srUrls[scale] = url;
+          p.srMode = scale;
           applySrOverlay(p);
           done++;
         } catch (e) {
@@ -512,8 +600,12 @@
       sheet.className = "thumbSheet"; label.className = "n"; label.textContent = num;
       thumb.append(sheet, label); thumb.onclick = () => gotoPage(num);
       pageFragment.append(wrap); thumbFragment.append(thumb);
-      d.pages.push({ num, wrap, thumb, thumbSheet: sheet, baseW: base.width, baseH: base.height,
-        known: num === 1, canvas: null, pixels: 0, drawEpoch: -1, thumbEpoch: -1, errorEpoch: -1, thumbErrorEpoch: -1 });
+      const p = { num, wrap, thumb, thumbSheet: sheet, baseW: base.width, baseH: base.height,
+        known: num === 1, canvas: null, pixels: 0, drawEpoch: -1, thumbEpoch: -1, errorEpoch: -1, thumbErrorEpoch: -1,
+        srUrls: {}, srMode: 0, srImg: null, srBusy: false };
+      d.pages.push(p);
+      // 每页都有独立的超分版本下拉框；未生成的分支会只对当前页现场超分。
+      ensurePageSrControl(p);
     }
     pagesEl.replaceChildren(pageFragment); $("thumbList").replaceChildren(thumbFragment);
     viewer.scrollTop = 0; viewer.scrollLeft = 0; thumbs.scrollTop = 0;

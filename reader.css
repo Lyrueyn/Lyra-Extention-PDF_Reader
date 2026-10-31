@@ -130,3 +130,10 @@ body.presenting #presentHint { display: block; }
 .pageWrap > canvas { position: relative; z-index: 0; }
 .pageWrap > .textLayer { z-index: 2; }
 body.night .pageWrap > img.srPage { filter: invert(.88) hue-rotate(180deg); }
+
+/* 每页独立的超分版本切换：原图 / 2× / 4×，悬停或已启用时显示 */
+.srSwitch { position: absolute; top: 8px; right: 8px; z-index: 5; opacity: 0; pointer-events: none; transition: opacity .15s; }
+.pageWrap:hover .srSwitch, .pageWrap.sr-active .srSwitch { opacity: 1; pointer-events: auto; }
+.srSwitch select { min-height: 26px; padding: 2px 6px; font-size: 11px; color: var(--text); background: #10161fe6; border: 1px solid #66ccff66; border-radius: 6px; backdrop-filter: blur(4px); }
+.srSwitch.busy select { opacity: .6; cursor: progress; }
+body.presenting .srSwitch { display: none; }
