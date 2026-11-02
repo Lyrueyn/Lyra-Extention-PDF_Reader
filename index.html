@@ -1,11 +1,11 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
   <title>璃鸢镜 · PDF 阅读器</title>
-  <link rel="stylesheet" href="reader.css?v=0.4.6">
+  <link rel="stylesheet" href="reader.css?v=0.4.7">
 </head>
 <body>
   <header id="top">
@@ -25,13 +25,14 @@
       </select>
       <div class="group">
         <button class="btn icon" id="zoomOutBtn" data-document disabled aria-label="缩小">−</button>
-        <output id="zoomValue" aria-label="缩放比例">100%</output>
+        <input id="zoomValue" value="100%" inputmode="decimal" aria-label="缩放比例，可输入百分比" data-document disabled autocomplete="off">
         <button class="btn icon" id="zoomInBtn" data-document disabled aria-label="放大">＋</button>
       </div>
       <button class="btn" id="rotateBtn" data-document disabled title="顺时针旋转 90° · R">旋转</button>
       <button class="btn" id="presentBtn" data-document disabled title="PPT 式放映：点一下下一页，Esc 退出">放映</button>
       <button class="btn" id="srBtn" data-document disabled title="Real-ESRGAN 页面超分（可选整篇/范围/倍率）">超分</button>
       <button class="btn" id="srSwitchBtn" data-document disabled aria-pressed="false" title="显示/隐藏每页的超分版本切换器">版本</button>
+      <button class="btn" id="selectBtn" aria-pressed="true" title="允许/禁止选中正文文字">选中文字</button>
       <button class="btn" id="nightBtn" aria-pressed="false">夜间</button>
     </div>
   </header>
@@ -93,8 +94,9 @@
       </div>
     </form>
   </dialog>
-  <script src="lib/pdf.min.js?v=0.4.6"></script>
-  <script src="reader.js?v=0.4.6"></script>
+  <script src="lib/pdf.min.js?v=0.4.7"></script>
+  <script src="reader.js?v=0.4.7"></script>
 </body>
 </html>
+
 

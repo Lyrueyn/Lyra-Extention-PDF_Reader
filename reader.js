@@ -14,8 +14,10 @@
   let lastViewerWidth = 0, lastViewerHeight = 0;
   let presenting = false, srJobToken = 0, backendBase = "";
   let presentationRestore = null;   // 进入放映前的缩放方式/倍率/旋转，退出时恢复
+  let selectable = true;            // 是否允许选中正文文字
+  const SELECT_KEY = "lyra-pdf-selectable:v1";
   const srCache = new Map();   // key: page|scale|rotation → data URL
-  pdfjsLib.GlobalWorkerOptions.workerSrc = "lib/pdf.worker.min.js?v=0.4.6";
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "lib/pdf.worker.min.js?v=0.4.7";
 
   function status(message, error = false) {
     $("status").textContent = message;
@@ -35,7 +37,8 @@
     $("nextBtn").disabled = !has || doc.current >= doc.pdf.numPages;
     $("zoomMode").value = mode;
     const scale = has ? pageScale(doc.pages[doc.current - 1]) : 1;
-    $("zoomValue").textContent = Math.round(scale * 100) + "%";
+    if (document.activeElement !== $("zoomValue")) $("zoomValue").value = Math.round(scale * 100) + "%";
+    $("zoomValue").disabled = !has;
     $("zoomOutBtn").disabled = !has || (mode === "custom" && manualScale <= .25);
     $("zoomInBtn").disabled = !has || (mode === "custom" && manualScale >= 5);
     $("readingProgress").textContent = has ? `${doc.current} / ${doc.pdf.numPages} 页` : "";
@@ -56,6 +59,7 @@
     document.body.classList.add("presenting");
     $("presentBtn").textContent = "退出放映";
     mode = "page";
+    invalidate();   // 放映要按“整页适配屏幕”重新出图，不能复用普通缩放倍率下的低清画布
     try { document.documentElement.requestFullscreen?.().catch?.(() => {}); } catch { }
     const a = anchor(); layout(a); gotoPage(doc.current); syncPresentationView();
     viewer.focus();
@@ -72,6 +76,7 @@
       rotation = presentationRestore.rotation;
       presentationRestore = null;
     }
+    invalidate();   // 返回普通阅读时同样要按当前缩放重新出图
     try { if (document.fullscreenElement) document.exitFullscreen?.(); } catch { }
     layout(anchor());
   }
@@ -369,6 +374,7 @@
     if (job) cancelJob(job);
     if (p.canvas) { p.canvas.width = 0; p.canvas.height = 0; p.canvas.remove(); }
     p.canvas = null; p.pixels = 0; p.drawEpoch = -1;
+    p.renderScale = 0; p.renderRotation = -1;
     p.textLayer?.remove(); p.textLayer = null; p.textDivs = null; p.textStrings = null;
     p.wrap.classList.add("unloaded");
     // PDF.js can release decoded operator/image resources once no render owns this page.
@@ -414,7 +420,13 @@
       d.wanted = new Set(nums); d.visible = new Set(nums);
       for (const n of nums) {
         const p = d.pages[n - 1];
-        if (!p || p.canvas || d.mainJobs.has(p.num) || p.drawEpoch === d.epoch || p.errorEpoch === d.epoch) continue;
+        if (!p) continue;
+        // 放映/全屏后页面尺寸会变：旧画布是按普通缩放倍率画的，再拉伸就会糊。
+        // 画布倍率或旋转与当前目标不一致时，直接丢弃旧画布，按整页适配尺寸重画。
+        if (p.canvas && (Math.abs((p.renderScale || 0) - pageScale(p)) > 0.002 || p.renderRotation !== rotation)) {
+          releasePage(d, p);
+        }
+        if (p.canvas || d.mainJobs.has(p.num) || p.drawEpoch === d.epoch || p.errorEpoch === d.epoch) continue;
         renderPage(d, p);
       }
       return;
@@ -485,6 +497,7 @@
       if (!valid(d, job)) return;
       const previous = p.canvas;
       p.canvas = canvas; p.pixels = canvas.width * canvas.height; attached = true;
+      p.renderScale = scale; p.renderRotation = rotation;
       if (previous) { previous.replaceWith(canvas); previous.width = 0; previous.height = 0; }
       else p.wrap.prepend(canvas);
       p.wrap.classList.remove("unloaded"); p.wrap.querySelector(".pageError")?.remove();
@@ -886,6 +899,20 @@
   $("zoomInBtn").onclick = () => zoomBy(1.2);
   $("zoomOutBtn").onclick = () => zoomBy(1 / 1.2);
   $("zoomMode").onchange = () => changeZoom($("zoomMode").value);
+  function commitZoomInput() {
+    if (!doc) { controls(); return; }
+    const raw = String($("zoomValue").value || "").replace("%", "").trim();
+    const percent = Number(raw);
+    if (!Number.isFinite(percent) || percent <= 0) { controls(); return; }
+    changeZoom("custom", Math.max(.25, Math.min(5, percent / 100)));
+    viewer.focus();
+  }
+  $("zoomValue").onfocus = () => $("zoomValue").select();
+  $("zoomValue").onkeydown = event => {
+    if (event.key === "Enter") { event.preventDefault(); commitZoomInput(); }
+    if (event.key === "Escape") { $("zoomValue").value = Math.round(pageScale(doc.pages[doc.current - 1]) * 100) + "%"; $("zoomValue").blur(); }
+  };
+  $("zoomValue").onblur = commitZoomInput;
   function rotate() { if (doc) { const a = anchor(); rotation = (rotation + 90) % 360; clearSrImages(); invalidate(); layout(a); } }
   $("rotateBtn").onclick = rotate;
   $("presentBtn").onclick = togglePresentation;
@@ -899,6 +926,16 @@
     const on = document.body.classList.toggle("night");
     $("nightBtn").setAttribute("aria-pressed", String(on)); $("nightBtn").textContent = on ? "日间" : "夜间";
   };
+  function applySelectable(on) {
+    selectable = !!on;
+    document.body.classList.toggle("no-select", !selectable);
+    $("selectBtn").setAttribute("aria-pressed", String(selectable));
+    $("selectBtn").textContent = selectable ? "选中文字" : "禁止选中";
+    try { localStorage.setItem(SELECT_KEY, selectable ? "1" : "0"); } catch { }
+  }
+  $("selectBtn").onclick = () => applySelectable(!selectable);
+  try { selectable = localStorage.getItem(SELECT_KEY) !== "0"; } catch { }
+  applySelectable(selectable);
   $("srForm").onsubmit = event => { event.preventDefault(); startSrJob(); };
   document.querySelectorAll('input[name="srScope"]').forEach(el => {
     el.addEventListener("change", () => {
@@ -1038,4 +1075,5 @@
   // 去掉 WebView2 默认右键菜单（返回/刷新/另存为/打印/检查），PDF 阅读时不弹浏览器小浮窗。
   document.addEventListener("contextmenu", event => event.preventDefault());
 })();
+
 

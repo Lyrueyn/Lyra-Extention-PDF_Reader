@@ -27,7 +27,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, #viewer:focus-v
 input, select { background: #10161f; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 7px 8px; min-height: 32px; }
 #pageInput { width: 48px; text-align: center; border: 0; padding: 5px; }
 #pageTotal { color: var(--muted); min-width: 28px; white-space: nowrap; }
-#zoomValue { width: 45px; text-align: center; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+#zoomValue { width: 58px; text-align: center; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; padding: 4px 3px; }
 #searchBar { display: flex; gap: 7px; align-items: center; flex: none; padding: 8px 18px; background: var(--panel); border-bottom: 1px solid var(--line); }
 #searchInput { width: min(300px, 45vw); }
 #searchCount { color: var(--muted); font-size: 12px; margin-right: auto; }
@@ -70,6 +70,8 @@ body.night .pageWrap > canvas, body.night .thumb canvas { filter: invert(.88) hu
 .textLayer br::selection { background: transparent; }
 .textLayer mark { color: transparent; background: #ffc64670; padding: 0; }
 .textLayer mark.selected { background: #ff8b39aa; outline: 1px solid #bd5600; }
+body.no-select #viewer, body.no-select .textLayer, body.no-select .textLayer * { user-select: none !important; -webkit-user-select: none !important; }
+body.no-select .textLayer :is(span, br) { cursor: default; }
 #empty, #loading, #dropHint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
 #empty { z-index: 3; background: #10151c; }
 .card { text-align: center; padding: 28px; max-width: 620px; }
